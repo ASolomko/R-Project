@@ -1,0 +1,196 @@
+---
+title: "Report"
+output: 
+  pdf_document: lualatex
+author: "Artem Solomko"
+---
+
+```{r setup, include=FALSE}
+tinytex::install_tinytex(force = TRUE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data description
+
+Each record in the database describes a Boston suburb or town. The data was drawn from the Boston Standard Metropolitan Statistical Area (SMSA) in 1970. The attributes are deﬁned as follows (taken from the UCI Machine Learning Repository)
+
+Parameters:  
+X: the sequence number of the line  
+crim: per capita crime rate by town  
+zn: proportion of residential land zoned for lots over 25,000 sq.ft.  
+indus: proportion of non-retail business acres per town  
+chas: Charles River dummy variable (= 1 if tract bounds river; 0 otherwise)  
+nox: nitric oxides concentration (parts per 10 million)  
+rm: average number of rooms per dwelling  
+age: proportion of owner-occupied units built prior to 1940  
+dis: weighted distances to ﬁve Boston employment centers  
+rad: index of accessibility to radial highways  
+tax: full-value property-tax rate per $10,000  
+ptratio: pupil-teacher ratio by town  
+black: 1000(Bk−0.63) where Bk is the proportion of blacks by town  
+lstat: % lower status of the population  
+medv: Median value of owner-occupied homes in $1000s  
+
+
+Data loading
+```{r loading}
+data_init <- read.csv("Boston.csv", sep=",", dec=".", header=1)
+data <- data_init
+```
+
+
+## Data analysis
+
+Data structure
+```{r str}
+str(data)
+```
+
+Data summary
+```{r summary}
+summary(data)
+```
+
+Boxplot for each column to detect outlires
+```{r boxplots}
+par(mfrow=c(4,4), mar=c(0,0,2,2))
+for (i in 2:ncol(data)) {
+  boxplot(data[,i], 
+          main = paste("Boxplot for", names(data)[i]), 
+          ylab = names(data)[i], 
+          outline = TRUE) 
+}
+```
+
+
+Correlation matrix
+```{r corrplot}
+if (!requireNamespace("corrplot", quietly = TRUE)) {
+  install.packages("corrplot")
+}
+library(corrplot)
+
+correlation_matrix <- cor(data[,-1])
+
+corrplot(correlation_matrix, method = "color", addCoef.col = "white", number.cex = 0.5)
+```
+By correlation matrix we can see huge correlation between tax and rad. We can delete from data one of them (see Data preparing)
+
+
+## Data preparing
+
+Deleting tax (by huge correlation between it and rad)
+```{r tax}
+data <- subset(data, select = -tax)
+```
+
+Outlires deleting
+```{r outlires}
+remove_outliers <- function(x) {
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = TRUE)
+  iqr <- IQR(x, na.rm = TRUE)
+  lower <- qnt[1] - 1.5 * iqr
+  upper <- qnt[2] + 1.5 * iqr
+  return(ifelse(x < lower | x > upper, NA, x))
+}
+
+for (i in 2:ncol(data)) {
+  data[,i] <- remove_outliers(data[,i])
+}
+
+data <- na.omit(data)
+```
+
+
+## Regression analysis
+
+We will try to predict medv by other parameters
+
+```{r regressionlm}
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+}
+
+library(ggplot2) 
+library(dplyr) 
+
+model <- lm(medv ~ crim + zn + indus + chas + nox + rm + age + dis + rad + ptratio + black + lstat, data = data)
+
+summary(model)
+```
+
+Adjusting a set of parameters based on their significance
+```{r correctionlm}
+model <- lm(medv ~ rm + age + dis + rad + ptratio + lstat, data = data)
+
+summary(model)
+```
+
+
+The model shows poor results, let's try to use the logarithm
+```{r logarithm}
+data$medv_log <- log(data$medv)
+
+model <- lm(medv_log ~ crim + zn + indus + chas + nox + rm + age + dis + rad + ptratio + black + lstat, data = data)
+
+summary(model)
+```
+
+
+Adjusting a set of parameters based on their significance for log regression
+```{r correctionlog}
+model <- lm(medv_log ~ nox + rm + age + dis + rad + ptratio + lstat, data = data)
+
+summary(model)
+```
+
+Logarithmic regression also shown bad results
+
+
+Trying to build square model
+```{r square}
+data$rm_2 = data$rm^2
+data$age_2 = data$age^2
+data$dis_2 = data$dis^2
+data$rad_2 = data$rad^2
+data$ptratio_2 = data$ptratio^2
+data$lstat_2 = data$lstat^2
+
+
+model <- lm(medv ~ rm + age + dis + rad + ptratio + lstat + rm_2 + age_2 + dis_2 + rad_2 + ptratio_2 + lstat_2, data = data)
+
+summary(model)
+```
+
+
+
+Adjusting a set of parameters based on their significance for square regression
+```{r correctionsquare}
+model <- lm(medv_log ~ rm_2 + age_2 + rm, data = data)
+
+summary(model)
+```
+
+
+
+Model became less quality then it was before
+
+Lets try to check autocorrelation
+```{r autocorrelation}
+data <- data_init
+acf(data)
+```
+
+
+Autocorrelation graphs show its presence in many places. Perhaps this was the reason for the poor results for the constructed models.
+
+Excluding its influence will improve the quality of the model.
+
+## Conclusion 
+
+The author analyzed and processed the input data. There have been attempts to build a regression model for the processed data. None of the regressions obtained gave satisfactory results. One of the reasons for this is the presence of autocorrelation. Perhaps, for the presented data, the best solution would be to use a different model specification (for example, machine learning models, neural networks, or others).
+
